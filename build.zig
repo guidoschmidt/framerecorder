@@ -7,7 +7,7 @@ pub fn build(b: *std.Build) void {
     _ = b.addModule("root", .{
         .root_source_file = b.path("./zig/root.zig"),
     });
-    
+
     const exe = b.addExecutable(.{
         .root_source_file = b.path("zig/main.zig"),
         .name = "zipper",
@@ -19,7 +19,6 @@ pub fn build(b: *std.Build) void {
 
     const zstbi = b.dependency("zstbi", .{});
     exe.root_module.addImport("zstbi", zstbi.module("root"));
-    exe.linkLibrary(zstbi.artifact("zstbi"));
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
