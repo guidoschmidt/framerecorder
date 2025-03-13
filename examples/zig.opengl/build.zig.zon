@@ -6,10 +6,12 @@
             .path = "../../",
         },
         .zigglgen = .{
-            .path = "./libs/zigglgen",
+            .url = "git+https://github.com/castholm/zigglgen#1c901bef6d312ef1814b8fce3c5a9e9e8e61ac2d",
+            .hash = "12209d8a018832bee15d9da29a12fa753d89b56cd843cdf1f39501546c6467e38ba1",
         },
         .zglfw = .{
-            .path = "./libs/zig-gamedev/libs/zglfw",
+            .url = "https://github.com/zig-gamedev/zglfw/archive/4d04fdac888c0f6c1c858ba343d33b19aa499cef.tar.gz",
+            .hash = "1220ca0fc58588dbcc38ecfb7dab23f281ba55a8dc76d6efd32afd881e96ffd13605",
         },
     },
     .paths = .{
