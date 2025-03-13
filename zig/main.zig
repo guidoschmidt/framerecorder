@@ -13,7 +13,7 @@ var image_data_buffer: std.ArrayList(ImageData) = undefined;
 var storage_thread: std.Thread = undefined;
 
 pub const ImageData = struct {
-    frame_num: usize,
+    frame: usize,
     width: i32,
     height: i32,
     imageData: []u8,
@@ -26,7 +26,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
     const subpath = try std.fmt.bufPrintZ(&temp_buffer, "./imgdata/{s}", .{image_data.foldername});
     try cwd.makePath(subpath);
     const output_file = std.fmt.allocPrintZ(allocator, "{s}/{s}_{d:0>8}.{s}", .{
-        subpath, image_data.filename, image_data.frame_num, image_data.ext,
+        subpath, image_data.filename, image_data.frame, image_data.ext,
     }) catch {
         @panic("Could not allocPrint!");
     };
@@ -57,10 +57,11 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
 }
 
 fn storeBuffers(allocator: Allocator) !void {
-    while(true) {
+    while (true) {
         if (image_data_buffer.items.len == 0) continue;
-        const next = image_data_buffer.pop();
-        try storeImage(allocator, next);
+        if (image_data_buffer.pop()) |next| {
+            try storeImage(allocator, next);
+        }
     }
 }
 
@@ -76,19 +77,17 @@ pub fn main() !void {
     image_data_buffer = std.ArrayList(ImageData).init(allocator);
     defer image_data_buffer.deinit();
 
-    storage_thread = try std.Thread.spawn(.{}, storeBuffers, .{ allocator });
+    storage_thread = try std.Thread.spawn(.{}, storeBuffers, .{allocator});
 
     const port: u16 = 8000;
     std.debug.print("\nRunnig tokamak\n>>> http://127.0.0.1:{d}", .{port});
 
-    const server = try tk.Server.init(allocator, routes, .{
-        .listen = .{
-            .hostname = "127.0.0.1",
-            .port = port,
-        }, .request = .{
-            .max_body_size = 100 * 1920 * 1920,
-        }
-    });
+    var server = try tk.Server.init(allocator, routes, .{ .listen = .{
+        .hostname = "127.0.0.1",
+        .port = port,
+    }, .request = .{
+        .max_body_size = 100 * 1920 * 1920,
+    } });
     try server.start();
 }
 
