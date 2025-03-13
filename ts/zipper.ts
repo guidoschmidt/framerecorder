@@ -12,13 +12,16 @@ export async function saveCanvasToBackend(
   }
   const dataUrl = canvas!.toDataURL("image/png");
   const data = {
-    imageData: dataUrl,
+    frame,
+    width: canvas.width,
+    height: canvas.height,
+    data: dataUrl,
     foldername: `${sequence}`,
     filename: `${frame}`,
     ext: "png",
   };
   await fetch(zipperUrl, {
-    method: "POST",
+    method: "PUT",
     body: JSON.stringify(data),
   });
 }
@@ -38,7 +41,10 @@ export function saveCanvasToBackendWithWorker(
   }
   const dataUrl = canvas!.toDataURL("image/png");
   const data = {
-    imageData: dataUrl,
+    frame,
+    width: canvas.width,
+    height: canvas.height,
+    data: dataUrl,
     foldername: `${sequence}`,
     filename: `${frame}`,
     ext: "png",

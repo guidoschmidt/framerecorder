@@ -4,7 +4,7 @@ export async function passToWorker(
 ) {
   const [url, data] = e.data;
   await fetch(url, {
-    method: "POST",
+    method: "PUT",
     body: JSON.stringify(data),
   });
   postMessage(true);

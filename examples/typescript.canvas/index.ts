@@ -20,8 +20,8 @@ videoEl.crossOrigin = "anonymous";
 document.body.appendChild(videoEl);
 
 const canvas = document.createElement("canvas");
-canvas.width = 6000;
-canvas.height = 6000;
+canvas.width = 1920;
+canvas.height = 1920;
 document.body.appendChild(canvas);
 
 const ctx = canvas.getContext("2d");
@@ -43,14 +43,14 @@ const animate = () => {
   ctx.fillRect(0, 0, 10, rectSize);
   ctx.restore();
 
-  ctx.drawImage(videoEl, 0, 0);
+  // ctx.drawImage(videoEl, 0, 0);
 
   if (window.record) {
     saveCanvasToBackendWithWorker(
-      "http://127.0.0.1:8000/",
+      "http://127.0.0.1:8000/api/data-url",
       "canvas",
       sequenceName.toString(),
-      `${frame}`.padStart(3, 0),
+      frame,
       workerUrl,
     );
     frame++;
