@@ -14,25 +14,25 @@ pub fn init(alloc: std.mem.Allocator, filename: []const u8, folder: []const u8) 
     file_prefix = filename;
     foldername = folder;
     background_threads = std.ArrayList(std.Thread).init(allocator);
-    for(0..max_threads) |i| {
+    for (0..max_threads) |i| {
         buffers[i] = std.ArrayList(ImageData).init(allocator);
-        const t = try std.Thread.spawn(.{}, sendPayloads, .{ i });
+        const t = try std.Thread.spawn(.{}, sendPayloads, .{i});
         try background_threads.append(t);
     }
 }
 
 pub fn deinit() void {
     for (buffers) |b| b.deinit();
-    for(background_threads.items) |t| t.detach();
+    for (background_threads.items) |t| t.detach();
 }
 
 pub fn putPixels(pixels: []u8, width: i32, height: i32, frame: usize) !void {
-    const payload = ImageData {
+    const payload = ImageData{
         .frame_num = frame,
         .ext = "png",
         .filename = file_prefix,
         .foldername = foldername,
-        .imageData = pixels,
+        .data = pixels,
         .width = width,
         .height = height,
     };
@@ -40,7 +40,7 @@ pub fn putPixels(pixels: []u8, width: i32, height: i32, frame: usize) !void {
 }
 
 fn sendPayloads(buffer_idx: usize) !void {
-    while(true) {
+    while (true) {
         if (buffers[buffer_idx].items.len == 0) continue;
         const payload = buffers[buffer_idx].pop();
         std.debug.print("\n>>> Sending {s} #{d}", .{ payload.filename, payload.frame_num });
@@ -52,18 +52,18 @@ fn sendPayloads(buffer_idx: usize) !void {
         var body = std.ArrayList(u8).init(allocator);
         defer body.deinit();
 
-        var http_client = std.http.Client { .allocator = allocator };
+        var http_client = std.http.Client{ .allocator = allocator };
         defer http_client.deinit();
         const request = try http_client.fetch(.{
             .method = .PUT,
-            .location = .{ .url = "http://127.0.0.1:8000" },
+            .location = .{ .url = "http://127.0.0.1:8000/pixels" },
             .response_storage = .{
                 .dynamic = &body,
             },
             .payload = string_stream.items,
         });
         if (request.status != .ok) {
-            std.debug.print("\nError on sending request: {any}", .{ request.status }); 
+            std.debug.print("\nError on sending request: {any}", .{request.status});
         }
     }
 }

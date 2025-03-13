@@ -8,6 +8,8 @@ const cwd = fs.cwd();
 const b64 = std.base64;
 const b64_decoder = b64.standard.Decoder;
 
+const l = std.log.scoped(.zipper);
+
 var temp_buffer: [256]u8 = undefined;
 var image_data_buffer: std.ArrayList(ImageData) = undefined;
 var storage_thread: std.Thread = undefined;
@@ -16,7 +18,7 @@ pub const ImageData = struct {
     frame: usize,
     width: i32,
     height: i32,
-    imageData: []u8,
+    data: []u8,
     foldername: []const u8,
     filename: []const u8,
     ext: []const u8,
@@ -36,7 +38,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
         .width = @intCast(image_data.width),
         .height = @intCast(image_data.height),
         .num_components = 4,
-        .data = image_data.imageData[0..],
+        .data = image_data.data[0..],
         .bytes_per_row = @intCast(image_data.width),
         .bytes_per_component = 1,
         .is_hdr = false,
@@ -93,15 +95,50 @@ pub fn main() !void {
 
 const routes: []const tk.Route = &.{
     tk.cors(),
-    .group("/", &.{.router(api)}),
+    .group("/api", &.{.router(api)}),
     .send(error.NotFound),
 };
 
 const api = struct {
-    pub fn @"PUT /"(req: *tk.Request, _: std.mem.Allocator, image_data: ImageData) !u32 {
+    pub fn @"PUT /pixels"(req: *tk.Request, _: std.mem.Allocator, image_data: ImageData) !u32 {
         _ = req;
         try image_data_buffer.append(image_data);
-        // try storeImage(allocator, image_data);
+        return 200;
+    }
+
+    pub fn @"PUT /data-url"(req: *tk.Request, allocator: std.mem.Allocator, image_data: ImageData) !u32 {
+        _ = req;
+
+        const schema = "data:image/png;base64,";
+        const data_str = image_data.data[schema.len..];
+        const decoded_length = b64_decoder.calcSizeForSlice(data_str) catch {
+            l.err("Could not calculate size for slice", .{});
+            return 500;
+        };
+        const data_decoded: []u8 = allocator.alloc(u8, decoded_length) catch {
+            l.err("Could not decode data", .{});
+            return 500;
+        };
+        b64_decoder.decode(data_decoded, data_str) catch return 500;
+
+        const subpath = std.fmt.bufPrintZ(&temp_buffer, "./imgdata/{s}/", .{image_data.foldername}) catch {
+            l.err("Could not format subpath {s}", .{image_data.foldername});
+            return 500;
+        };
+        cwd.makePath(subpath) catch {
+            l.err("Could not create subpath {s}", .{subpath});
+            return 500;
+        };
+
+        const filename_with_ext = std.fmt.allocPrint(allocator, "{s}/{s}.{s}", .{ subpath, image_data.filename, image_data.ext }) catch return 500;
+        defer allocator.free(filename_with_ext);
+
+        const out_file = cwd.createFile(filename_with_ext, .{ .read = false }) catch return 500;
+        defer out_file.close();
+        out_file.writeAll(data_decoded) catch return 500;
+
+        l.info("> {d}", .{image_data.frame});
+
         return 200;
     }
 };
