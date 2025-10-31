@@ -1,6 +1,6 @@
-[![CI](https://github.com/guidoschmidt/zipper/actions/workflows/build.yaml/badge.svg)](https://github.com/guidoschmidt/zipper/actions/workflows/build.yaml)
+[![CI](https://github.com/guidoschmidt/framerecorder/actions/workflows/build.yaml/badge.svg)](https://github.com/guidoschmidt/zipper/actions/workflows/build.yaml)
 
-# zipper
+# framerecorder
 > zig REST api server to store image data requests, 
 > e.g. for saving web canvas data
 
@@ -17,8 +17,8 @@ sequences right from canvas API animations.
 ### Build & Run
 
 ```bash
-git clone git@github.com:guidoschmidt/zipper.git
-cd zipper
+git clone git@github.com:guidoschmidt/framerecorder.git
+cd framerecorder
 git submodule update --recursive --init
 zig build
 zig build run
@@ -71,3 +71,6 @@ function draw() {
 - Error handling
 - p5.js example
 - three.js example
+
+### References
+- [ofxFFmpegRecorder](https://github.com/NickHardeman/ofxFFmpegRecorder/blob/master/src/ofxFFmpegRecorder.cpp)

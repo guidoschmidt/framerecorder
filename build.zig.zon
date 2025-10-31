@@ -1,15 +1,21 @@
-.{ .name = .zipper, .fingerprint = 0x1616dd0602177d9c, .version = "0.1.0", .paths = .{
-    "src",
-    "build.zig",
-    "build.zig.zon",
-    "README.md",
-}, .dependencies = .{
-    .tokamak = .{
-        .url = "https://github.com/guidoschmidt/tokamak/archive/042bab22b909f0cac8bc1f3496e67927cc12f5b8.tar.gz",
-        .hash = "122047b9f4162fb45ac01be8b26267b0d8b5c0bd492486ab4fb14ae803b75502b024",
+.{
+    .name = .framerecorder,
+    .fingerprint = 0x4034b267a3f0c164,
+    .version = "0.1.0",
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
     },
-    .zstbi = .{
-        .url = "https://github.com/zig-gamedev/zstbi/archive/4fce0ee7ca94bd42536c136d9a369e647bc55b14.tar.gz",
-        .hash = "122080418650eec7bd891749529fd13c99a118181fac8715035fdcfd8f76d65b2b0f",
+    .dependencies = .{
+        .tokamak = .{
+            .url = "https://github.com/guidoschmidt/tokamak/archive/a8010432a642298461e98c7d90d737247feeaeb5.tar.gz",
+            .hash = "1220bfd0a3a9b51e5f1d5e06071c35cea771f59a85cd5513976d96a9b6cafcc73ce1",
+        },
+        .zstbi = .{
+            .url = "git+https://github.com/zig-gamedev/zstbi.git#2c4b3100ccb7aed90ecc9439030899764e2a8d47",
+            .hash = "zstbi-0.11.0-dev-L0Ea_yaWBwAHwFoCuyjkFyaiSsbjt4UOrkntR0c_nmzz",
+        },
     },
-} }
+}

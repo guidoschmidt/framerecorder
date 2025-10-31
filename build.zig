@@ -4,17 +4,20 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    _ = b.addModule("root", .{
-        .root_source_file = b.path("./zig/root.zig"),
+    const exe = b.addExecutable(.{
+        .name = "framerecorder",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("zig/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
-    const exe = b.addExecutable(.{
-        .root_source_file = b.path("zig/main.zig"),
-        .name = "zipper",
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("tokamak", b.dependency("tokamak", .{}).module("tokamak"));
+    const tokamak = b.dependency("tokamak", .{});
+    exe.root_module.addImport(
+        "tokamak",
+        tokamak.module("tokamak"),
+    );
     b.installArtifact(exe);
 
     const zstbi = b.dependency("zstbi", .{});

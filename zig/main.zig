@@ -11,7 +11,7 @@ const b64_decoder = b64.standard.Decoder;
 const l = std.log.scoped(.zipper);
 
 var temp_buffer: [256]u8 = undefined;
-var image_data_buffer: std.ArrayList(ImageData) = undefined;
+var image_data_buffer: std.array_list.Managed(ImageData) = undefined;
 var storage_thread: std.Thread = undefined;
 
 pub const ImageData = struct {
@@ -24,10 +24,28 @@ pub const ImageData = struct {
     ext: []const u8,
 };
 
+fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
+    var child_process = std.process.Child.init(&[_][]const u8{ "ffmpeg", "-f rawvideo", "-video_size 1920x1920", "-pixel_format rgb24", "-framerate 1", "/dev/stdin", "output.mp4" }, allocator);
+    child_process.stdout_behavior = .Pipe;
+    child_process.stdin_behavior = .Pipe;
+    child_process.stderr_behavior = .Pipe;
+    try child_process.spawn();
+    _ = try child_process.stdin.?.write(bytes);
+    child_process.stdin.?.close();
+    _ = try child_process.wait();
+    const errbuf: []u8 = try allocator.alloc(u8, 1024);
+    var stderr_buf = std.array_list.Aligned(u8, null).initBuffer(errbuf);
+    const outbuf: []u8 = try allocator.alloc(u8, 1024);
+    var stdout_buf = std.array_list.Aligned(u8, null).initBuffer(outbuf);
+    try child_process.collectOutput(allocator, &stdout_buf, &stderr_buf, 1024);
+    std.debug.print("{s}", .{stdout_buf.items});
+}
+
 fn storeImage(allocator: Allocator, image_data: ImageData) !void {
     const subpath = try std.fmt.bufPrintZ(&temp_buffer, "./imgdata/{s}", .{image_data.foldername});
     try cwd.makePath(subpath);
-    const output_file = std.fmt.allocPrintZ(allocator, "{s}/{s}_{d:0>8}.{s}", .{
+
+    const output_file = std.fmt.bufPrintZ(&temp_buffer, "{s}/{s}_{d:0>8}.{s}", .{
         subpath, image_data.filename, image_data.frame, image_data.ext,
     }) catch {
         @panic("Could not allocPrint!");
@@ -76,7 +94,7 @@ pub fn main() !void {
     zstbi.setFlipVerticallyOnWrite(true);
     defer zstbi.deinit();
 
-    image_data_buffer = std.ArrayList(ImageData).init(allocator);
+    image_data_buffer = std.array_list.Managed(ImageData).init(allocator);
     defer image_data_buffer.deinit();
 
     storage_thread = try std.Thread.spawn(.{}, storeBuffers, .{allocator});
@@ -130,12 +148,14 @@ const api = struct {
             return 500;
         };
 
-        const filename_with_ext = std.fmt.allocPrint(allocator, "{s}/{s}.{s}", .{ subpath, image_data.filename, image_data.ext }) catch return 500;
-        defer allocator.free(filename_with_ext);
+        // const filename_with_ext = std.fmt.allocPrint(allocator, "{s}/{s}.{s}", .{ subpath, image_data.filename, image_data.ext }) catch return 500;
+        // defer allocator.free(filename_with_ext);
 
-        const out_file = cwd.createFile(filename_with_ext, .{ .read = false }) catch return 500;
-        defer out_file.close();
-        out_file.writeAll(data_decoded) catch return 500;
+        // const out_file = cwd.createFile(filename_with_ext, .{ .read = false }) catch return 500;
+        // defer out_file.close();
+        //out_file.writeAll(data_decoded) catch return 500;
+
+        try encodeVideo(allocator, data_decoded);
 
         l.info("> {d}", .{image_data.frame});
 
