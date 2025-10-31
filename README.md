@@ -1,4 +1,4 @@
-[![CI](https://github.com/guidoschmidt/framerecorder/actions/workflows/build.yaml/badge.svg)](https://github.com/guidoschmidt/zipper/actions/workflows/build.yaml)
+[![CI](https://github.com/guidoschmidt/framerecorder/actions/workflows/build.yaml/badge.svg)](https://github.com/guidoschmidt/framerecorder/actions/workflows/build.yaml)
 
 # framerecorder
 > zig REST api server to store image data requests, 

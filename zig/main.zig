@@ -8,7 +8,7 @@ const cwd = fs.cwd();
 const b64 = std.base64;
 const b64_decoder = b64.standard.Decoder;
 
-const l = std.log.scoped(.zipper);
+const l = std.log.scoped(.framerecorder);
 
 var temp_buffer: [256]u8 = undefined;
 var image_data_buffer: std.array_list.Managed(ImageData) = undefined;
