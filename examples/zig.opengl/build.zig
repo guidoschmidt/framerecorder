@@ -6,9 +6,11 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "zipper.opengl",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     b.installArtifact(exe);
@@ -19,17 +21,12 @@ pub fn build(b: *std.Build) void {
     exe.linkLibrary(zglfw.artifact("glfw"));
 
     // OpenGL bindings: zigglgen
-    const gl_bindings = @import("zigglgen").generateBindingsModule(b, .{
-        .api = .gl,
-        .version = .@"4.0",
-        .profile = .core,
-        .extensions = &.{}
-    });
+    const gl_bindings = @import("zigglgen").generateBindingsModule(b, .{ .api = .gl, .version = .@"4.0", .profile = .core, .extensions = &.{} });
     exe.root_module.addImport("gl", gl_bindings);
 
     // Zipper
-    const zipper = b.dependency("zipper", .{});
-    exe.root_module.addImport("zipper", zipper.module("root"));
+    const framerecorder = b.dependency("framerecorder", .{});
+    exe.root_module.addImport("framerecorder", framerecorder.module("root"));
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

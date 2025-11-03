@@ -1,4 +1,4 @@
-import { saveCanvasToBackendWithWorker } from "../../ts/zipper";
+import { saveCanvasToBackendWithWorker } from "../../src/ts/framerecorder";
 
 const workerUrl = new URL("./worker", import.meta.url);
 
@@ -20,8 +20,8 @@ videoEl.crossOrigin = "anonymous";
 document.body.appendChild(videoEl);
 
 const canvas = document.createElement("canvas");
-canvas.width = 1920;
-canvas.height = 1920;
+canvas.width = 720;
+canvas.height = 720;
 document.body.appendChild(canvas);
 
 const ctx = canvas.getContext("2d");
@@ -47,7 +47,7 @@ const animate = () => {
 
   if (window.record) {
     saveCanvasToBackendWithWorker(
-      "http://127.0.0.1:8000/api/data-url",
+      "http://127.0.0.1:8000/api/imageseq",
       "canvas",
       sequenceName.toString(),
       frame,

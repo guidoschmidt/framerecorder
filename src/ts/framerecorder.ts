@@ -1,5 +1,8 @@
+import type { ImageData } from "./ImageData";
+import { ImageDataFormat } from "./ImageData";
+
 export async function saveCanvasToBackend(
-  zipperUrl: string,
+  url: string,
   selector: string,
   sequence: string,
   frame: number,
@@ -11,17 +14,18 @@ export async function saveCanvasToBackend(
     throw new Error(`No canvas element with ${selector} found`);
   }
   const dataUrl = canvas!.toDataURL("image/png");
-  const data = {
+  const data: ImageData = {
     frame,
     width: canvas.width,
     height: canvas.height,
+    data_format: ImageDataFormat.DATA_URL,
     data: dataUrl,
     foldername: `${sequence}`,
-    filename: `${frame}`,
+    filename: "test",
     ext: "png",
   };
-  await fetch(zipperUrl, {
-    method: "PUT",
+  await fetch(url, {
+    method: "POST",
     body: JSON.stringify(data),
   });
 }
@@ -45,9 +49,11 @@ export function saveCanvasToBackendWithWorker(
     width: canvas.width,
     height: canvas.height,
     data: dataUrl,
+    data_format: ImageDataFormat.DATA_URL,
     foldername: `${sequence}`,
-    filename: `${frame}`,
+    filename: "test",
     ext: "png",
+    format: 1,
   };
   runInWebWorker(url, data, workerUrl);
 }

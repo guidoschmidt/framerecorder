@@ -36,8 +36,11 @@ pub fn putPixels(pixels: []u8, width: i32, height: i32, frame: usize) !void {
         .width = width,
         .height = height,
     };
-    try buffers[@mod(frame, max_threads)].append(payload);
+        _ = try std.Thread.spawn(.{}, sendPayload, .{i});
+    // try buffers[@mod(frame, max_threads)].append(payload);
 }
+
+fn sendPoy
 
 fn sendPayloads(buffer_idx: usize) !void {
     while (true) {
