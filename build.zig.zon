@@ -1,17 +1,25 @@
 .{
-    .name = "zipper",
-    .version = "0.0.1",
+    .name = .framerecorder,
+    .fingerprint = 0x4034b267a3f0c164,
+    .version = "0.1.0",
     .paths = .{
-        "src/",
+        "src",
         "build.zig",
         "build.zig.zon",
         "README.md",
     },
     .dependencies = .{
-        // zap v0.5.0
-        .zap = .{
-            .url = "https://github.com/zigzap/zap/archive/refs/tags/v0.8.0.tar.gz",
-            .hash = "12209936c3333b53b53edcf453b1670babb9ae8c2197b1ca627c01e72670e20c1a21",
-        }
-    }
+        .tokamak = .{
+            .url = "https://github.com/guidoschmidt/tokamak/archive/a8010432a642298461e98c7d90d737247feeaeb5.tar.gz",
+            .hash = "1220bfd0a3a9b51e5f1d5e06071c35cea771f59a85cd5513976d96a9b6cafcc73ce1",
+        },
+        .zstbi = .{
+            .url = "git+https://github.com/zig-gamedev/zstbi.git#2c4b3100ccb7aed90ecc9439030899764e2a8d47",
+            .hash = "zstbi-0.11.0-dev-L0Ea_yaWBwAHwFoCuyjkFyaiSsbjt4UOrkntR0c_nmzz",
+        },
+        .ziggy = .{
+            .url = "git+https://github.com/kristoff-it/ziggy.git#4353b20ef2ac750e35c6d68e4eb2a07c2d7cf901",
+            .hash = "ziggy-0.1.0-kTg8v5pABgDztlefWHceH-Sh8tVveguFC61QkmLkIRaA",
+        },
+    },
 }

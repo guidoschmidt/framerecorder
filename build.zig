@@ -4,20 +4,47 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zap = b.dependency("zap", .{
+    _ = b.addModule("root", .{
+        .root_source_file = b.path("src/zig/root.zig"),
         .target = target,
         .optimize = optimize,
-        .openssl = false, // set to true to enable TLS support
     });
 
     const exe = b.addExecutable(.{
-        .root_source_file = b.path( "src/main.zig"),
-        .name = "zipper",
-        .target = target,
+        .name = "framerecorder",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/zig/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-    exe.root_module.addImport("zap", zap.module("zap"));
+
+    // Dependencies
+    const tokamak = b.dependency("tokamak", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport(
+        "tokamak",
+        tokamak.module("tokamak"),
+    );
+
+    const zstbi = b.dependency("zstbi", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zstbi", zstbi.module("root"));
+
+    const ziggy_dep = b.dependency("ziggy", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("ziggy", ziggy_dep.module("ziggy"));
+
+    // Installation
     b.installArtifact(exe);
 
+    // Run
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
