@@ -6,7 +6,6 @@ const config = @import("Config.zig");
 
 const Allocator = std.mem.Allocator;
 const fs = std.fs;
-const cwd = fs.cwd();
 const b64 = std.base64;
 const b64_decoder = b64.standard.Decoder;
 
@@ -70,25 +69,30 @@ fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
 }
 
 fn storeImage(allocator: Allocator, image_data: ImageData) !void {
-    var temp_buffer: [1024]u8 = undefined;
-    const subpath = try std.fmt.bufPrint(
-        &temp_buffer,
-        "./imgdata/{s}",
-        .{image_data.foldername},
+    const subpath = try std.fs.path.join(
+      allocator,
+      &.{
+        config.default_config.output_dir,
+        image_data.foldername,
+      },
     );
-    try cwd.makePath(subpath);
+    try fs.cwd().makePath(subpath);
 
-    var temp_buffer_2: [1024]u8 = undefined;
+    var temp_buffer: [1024]u8 = undefined;
     const filename = try std.fmt.bufPrintZ(
-        &temp_buffer_2,
-        "{s}/{s}_{d:0>4}.{s}",
-        .{ subpath, image_data.filename, image_data.frame, image_data.ext },
+        &temp_buffer,
+        "{s}_{d:0>4}.{s}",
+        .{ image_data.filename, image_data.frame, image_data.ext },
+    );
+    const filepath = try std.fs.path.join(
+      allocator,
+      &.{subpath, filename},
     );
     std.debug.print("{s}\n", .{filename});
 
     switch (image_data.data_format) {
         .DATA_URL => {
-            const image_file = try fs.cwd().createFile(filename, .{});
+            const image_file = try fs.cwd().createFile(filepath, .{});
             defer image_file.close();
             const schema = "data:image/png;base64,";
             const data_str = image_data.data[schema.len..];
@@ -108,7 +112,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
                 .bytes_per_component = 1,
                 .is_hdr = false,
             };
-            zstbi.Image.writeToFile(img, filename, .png) catch |err| {
+            zstbi.Image.writeToFile(img, filepath[0..:0], .png) catch |err| {
                 std.log.err("{any}", .{err});
             };
         },
@@ -146,7 +150,7 @@ pub fn main() !void {
     var buffer: [256]u8 = undefined;
     var writer = output_buffer.writer().adaptToNewApi(&buffer).new_interface;
     try ziggy.stringify(config.default_config, .{}, &writer);
-    std.debug.print("Framerecorder running\n→ http://{s}:{d}\nctrl+c to stop\n", .{
+    std.debug.print("Framerecorder running...\nhttp://{s}:{d}\nctrl+c to stop\n", .{
         config.default_config.host,
         config.default_config.port,
     });
