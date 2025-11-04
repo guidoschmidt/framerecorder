@@ -116,6 +116,8 @@ pub fn main() !void {
 
 const routes: []const tk.Route = &.{
     tk.cors(),
+    .get("/openapi.json", tk.swagger.json(.{ .info = .{ .title = "framerecorder" } })),
+    .get("/docs", tk.swagger.ui(.{ .url = "openapi.json" })),
     .group("/api", &.{.router(api)}),
     .send(error.NotFound),
 };
