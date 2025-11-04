@@ -70,11 +70,11 @@ fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
 
 fn storeImage(allocator: Allocator, image_data: ImageData) !void {
     const subpath = try std.fs.path.join(
-      allocator,
-      &.{
-        config.default_config.output_dir,
-        image_data.foldername,
-      },
+        allocator,
+        &.{
+            config.default_config.output_dir,
+            image_data.foldername,
+        },
     );
     try fs.cwd().makePath(subpath);
 
@@ -85,8 +85,8 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
         .{ image_data.filename, image_data.frame, image_data.ext },
     );
     const filepath = try std.fs.path.join(
-      allocator,
-      &.{subpath, filename},
+        allocator,
+        &.{ subpath, filename },
     );
     std.debug.print("{s}\n", .{filename});
 
@@ -112,7 +112,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
                 .bytes_per_component = 1,
                 .is_hdr = false,
             };
-            zstbi.Image.writeToFile(img, filepath[0..:0], .png) catch |err| {
+            zstbi.Image.writeToFile(img, filepath[0.. :0], .png) catch |err| {
                 std.log.err("{any}", .{err});
             };
         },
