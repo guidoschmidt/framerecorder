@@ -4,27 +4,24 @@ const ImageData = @import("ImageData.zig").ImageData;
 var allocator: std.mem.Allocator = undefined;
 var file_prefix: []const u8 = undefined;
 var foldername: []const u8 = undefined;
-
-const max_threads = 4;
-var payloads: std.array_list.Managed(ImageData) = undefined;
-var thread_pool: [max_threads]std.Thread = undefined;
+var thread_pool: std.Thread.Pool = undefined;
+var wg: std.Thread.WaitGroup = .{};
 
 pub fn init(alloc: std.mem.Allocator, filename: []const u8, folder: []const u8) !void {
     allocator = alloc;
     file_prefix = filename;
     foldername = folder;
-    payloads = std.array_list.Managed(ImageData).init(allocator);
-    _ = try std.Thread.spawn(.{}, sendPayloads, .{});
+    try thread_pool.init(.{
+        .allocator = allocator,
+    });
 }
 
 pub fn deinit() void {
-    // for (payloads.items) |b| b.deinit();
-    payloads.deinit();
-    // for (thread_pool.items) |t| t.detach();
-    // thread_pool.deinit();
+    thread_pool.deinit();
+    wg.wait();
 }
 
-pub fn putPixels(pixels: []u8, width: i32, height: i32, frame: u32) !void {
+pub fn storePixels(pixels: []u8, width: i32, height: i32, frame: u32) !void {
     const payload = ImageData{
         .frame = frame,
         .ext = "png",
@@ -35,10 +32,23 @@ pub fn putPixels(pixels: []u8, width: i32, height: i32, frame: u32) !void {
         .height = height,
     };
     try sendPayload(payload);
-    // try payloads.append(payload);
-    // thread_pool[@mod(frame, max_threads)]
-    // _ = try std.Thread.spawn(.{}, sendPayload, .{payload});
-    // try buffers[@mod(frame, max_threads)].append(payload);
+}
+
+pub fn storePixelsThreaded(pixels: []u8, width: i32, height: i32, frame: u32) !void {
+    const payload = ImageData{
+        .frame = frame,
+        .ext = "png",
+        .filename = file_prefix,
+        .foldername = foldername,
+        .data = pixels,
+        .width = width,
+        .height = height,
+    };
+    thread_pool.spawnWg(&wg, startThread, .{payload});
+}
+
+pub fn startThread(payload: ImageData) void {
+    sendPayload(payload) catch @panic("Failed to send payload!");
 }
 
 pub fn sendPayload(payload: ImageData) !void {
@@ -65,14 +75,5 @@ pub fn sendPayload(payload: ImageData) !void {
     });
     if (request.status != .ok) {
         std.debug.print("[ERROR] Failed to send request: {any}\n", .{request.status});
-    }
-}
-
-fn sendPayloads() !void {
-    while (true) {
-        while (payloads.pop()) |next| {
-            const thread = try std.Thread.spawn(.{}, sendPayload, .{next});
-            thread.join();
-        }
     }
 }

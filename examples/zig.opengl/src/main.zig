@@ -53,8 +53,8 @@ pub fn main() !void {
         if (is_recording) {
             std.debug.print("\nSaving frame {d}...", .{frame});
             gl.ReadPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, @ptrCast(pixels[0..]));
-            try framerecorder.putPixels(
-                pixels,
+            try framerecorder.storePixelsThreaded(
+                try allocator.dupe(u8, pixels),
                 width,
                 height,
                 frame,
