@@ -57,11 +57,11 @@ fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
         "{s}_{d:0>4}.{s}",
         .{ image_data.filename, image_data.frame, image_data.ext },
     );
-    const filepath = try std.fs.path.join(
+    const filepath = try std.fs.path.joinZ(
         allocator,
         &.{ subpath, filename },
     );
-    std.debug.print("{s}\n", .{filename});
+    std.debug.print(">>> {s}\n", .{filename});
 
     switch (image_data.data_format) {
         .DATA_URL => {
@@ -85,7 +85,7 @@ fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
                 .bytes_per_component = 1,
                 .is_hdr = false,
             };
-            zstbi.Image.writeToFile(image, filepath[0.. :0], .png) catch |err| {
+            zstbi.Image.writeToFile(image, filepath, .png) catch |err| {
                 std.log.err("{any}", .{err});
             };
         },

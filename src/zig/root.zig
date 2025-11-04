@@ -1,5 +1,5 @@
 const std = @import("std");
-const ImageData = @import("main.zig").ImageData;
+const ImageData = @import("ImageData.zig").ImageData;
 
 var allocator: std.mem.Allocator = undefined;
 var file_prefix: []const u8 = undefined;
