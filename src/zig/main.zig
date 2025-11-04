@@ -147,14 +147,26 @@ pub fn main() !void {
     var output_buffer = std.array_list.Managed(u8).init(allocator);
     defer output_buffer.deinit();
 
-    var buffer: [256]u8 = undefined;
-    var writer = output_buffer.writer().adaptToNewApi(&buffer).new_interface;
-    try ziggy.stringify(config.default_config, .{}, &writer);
+    var json_writer: std.Io.Writer.Allocating = .init(allocator);
+    try ziggy.stringify(config.default_config, .{
+        .whitespace = .space_2,
+        .emit_null_fields = true,
+        .omit_top_level_curly = false,
+    }, &json_writer.writer);
     std.debug.print("Framerecorder running...\nhttp://{s}:{d}\nctrl+c to stop\n", .{
         config.default_config.host,
         config.default_config.port,
     });
-    std.debug.print("Config:\n{s}\n", .{writer.buffered()});
+    const config_str = json_writer.written();
+    _ = fs.cwd().openFile("confing.ziggy", .{}) catch {
+        const config_file = fs.cwd().createFile("config.ziggy", .{}) catch {
+            @panic("Failed to create config file.");
+        };
+        config_file.writeAll(config_str) catch {
+            @panic("Failed to write config file.");
+        };
+        std.debug.print("Config:\n{s}\n", .{config_str});
+    };
 
     var server = try tk.Server.init(allocator, routes, .{ .listen = .{
         .hostname = config.default_config.host,
