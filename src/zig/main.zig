@@ -12,10 +12,6 @@ const b64_decoder = b64.standard.Decoder;
 
 const l = std.log.scoped(.framerecorder);
 
-const max_threads: u8 = 4;
-var image_data_buffers: [max_threads]std.array_list.Managed(ImageData) = undefined;
-var storage_threads: std.array_list.Managed(std.Thread) = undefined;
-
 const ImageDataFormat = enum(u3) {
     RAW,
     DATA_URL,
@@ -115,15 +111,6 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
     }
 }
 
-fn storeBuffers(allocator: Allocator, i: usize) !void {
-    while (true) {
-        if (image_data_buffers[i].items.len == 0) continue;
-        if (image_data_buffers[i].pop()) |next| {
-            try storeImage(allocator, next);
-        }
-    }
-}
-
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -133,30 +120,19 @@ pub fn main() !void {
     zstbi.setFlipVerticallyOnWrite(true);
     defer zstbi.deinit();
 
-    storage_threads = std.array_list.Managed(std.Thread).init(allocator);
-    for (0..max_threads) |i| {
-        image_data_buffers[i] = std.array_list.Managed(ImageData).init(allocator);
-        const t = try std.Thread.spawn(.{}, storeBuffers, .{ allocator, i });
-        try storage_threads.append(t);
-    }
-
-    var output_buffer = std.array_list.Managed(u8).init(allocator);
-    defer output_buffer.deinit();
-
-    var buffer: [256]u8 = undefined;
-    var writer = output_buffer.writer().adaptToNewApi(&buffer).new_interface;
-    try ziggy.stringify(config.default_config, .{}, &writer);
+    var json_writer: std.Io.Writer.Allocating = .init(allocator);
+    try ziggy.stringify(config.default_config, .{}, &json_writer.writer);
     std.debug.print("Framerecorder running\n→ http://{s}:{d}\nctrl+c to stop\n", .{
         config.default_config.host,
         config.default_config.port,
     });
-    std.debug.print("Config:\n{s}\n", .{writer.buffered()});
+    std.debug.print("Config:\n{s}\n", .{json_writer.written()});
 
     var server = try tk.Server.init(allocator, routes, .{ .listen = .{
         .hostname = config.default_config.host,
         .port = config.default_config.port,
     }, .request = .{
-        .max_body_size = 100 * 1920 * 1920,
+        .max_body_size = 256 + (1920 * 1920 * 4),
     } });
     try server.start();
 }
@@ -175,10 +151,10 @@ const api = struct {
         return 501;
     }
 
-    pub fn @"POST /imageseq"(req: *tk.Request, _: std.mem.Allocator, payload: ImageData) !u32 {
+    pub fn @"POST /imageseq"(req: *tk.Request, allocator: std.mem.Allocator, payload: ImageData) !u32 {
         _ = req;
         std.debug.print(">>>{f}\n", .{payload});
-        try image_data_buffers[@mod(payload.frame, max_threads)].append(payload);
+        try storeImage(allocator, payload);
         return 200;
     }
 };
