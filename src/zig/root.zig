@@ -5,7 +5,7 @@ var allocator: std.mem.Allocator = undefined;
 var file_prefix: []const u8 = undefined;
 var foldername: []const u8 = undefined;
 var thread_pool: std.Thread.Pool = undefined;
-var wg: std.Thread.WaitGroup = .{};
+var wait_group: std.Thread.WaitGroup = .{};
 
 pub fn init(alloc: std.mem.Allocator, filename: []const u8, folder: []const u8) !void {
     allocator = alloc;
@@ -18,7 +18,7 @@ pub fn init(alloc: std.mem.Allocator, filename: []const u8, folder: []const u8) 
 
 pub fn deinit() void {
     thread_pool.deinit();
-    wg.wait();
+    wait_group.wait();
 }
 
 pub fn storePixels(pixels: []u8, width: i32, height: i32, frame: u32) !void {
@@ -44,7 +44,7 @@ pub fn storePixelsThreaded(pixels: []u8, width: i32, height: i32, frame: u32) !v
         .width = width,
         .height = height,
     };
-    thread_pool.spawnWg(&wg, startThread, .{payload});
+    thread_pool.spawnWg(&wait_group, startThread, .{payload});
 }
 
 pub fn startThread(payload: ImageData) void {
