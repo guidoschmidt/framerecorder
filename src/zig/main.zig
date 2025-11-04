@@ -3,42 +3,14 @@ const tk = @import("tokamak");
 const zstbi = @import("zstbi");
 const ziggy = @import("ziggy");
 const config = @import("Config.zig");
+const img = @import("ImageData.zig");
 
 const Allocator = std.mem.Allocator;
 const fs = std.fs;
-const cwd = fs.cwd();
 const b64 = std.base64;
 const b64_decoder = b64.standard.Decoder;
 
 const l = std.log.scoped(.framerecorder);
-
-const ImageDataFormat = enum(u3) {
-    RAW,
-    DATA_URL,
-};
-
-pub const ImageData = struct {
-    frame: u32,
-    width: i32,
-    height: i32,
-    foldername: []const u8,
-    filename: []const u8,
-    ext: []const u8,
-    data_format: ImageDataFormat = .RAW,
-    data: []u8,
-
-    pub fn format(self: ImageData, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        try writer.print("\nformat: {t}\nframe: {d}\nsize: {d} × {d}\nlocation: {s}/{s} [.{s}]", .{
-            self.data_format,
-            self.frame,
-            self.width,
-            self.height,
-            self.foldername,
-            self.filename,
-            self.ext,
-        });
-    }
-};
 
 fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
     var child_process = std.process.Child.init(&[_][]const u8{
@@ -65,26 +37,31 @@ fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
     std.debug.print("{s}", .{stdout_buf.items});
 }
 
-fn storeImage(allocator: Allocator, image_data: ImageData) !void {
-    var temp_buffer: [1024]u8 = undefined;
-    const subpath = try std.fmt.bufPrint(
-        &temp_buffer,
-        "./imgdata/{s}",
-        .{image_data.foldername},
+fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
+    const subpath = try std.fs.path.join(
+        allocator,
+        &.{
+            config.default_config.output_dir,
+            image_data.foldername,
+        },
     );
-    try cwd.makePath(subpath);
+    try fs.cwd().makePath(subpath);
 
-    var temp_buffer_2: [1024]u8 = undefined;
+    var temp_buffer: [1024]u8 = undefined;
     const filename = try std.fmt.bufPrintZ(
-        &temp_buffer_2,
-        "{s}/{s}_{d:0>4}.{s}",
-        .{ subpath, image_data.filename, image_data.frame, image_data.ext },
+        &temp_buffer,
+        "{s}_{d:0>4}.{s}",
+        .{ image_data.filename, image_data.frame, image_data.ext },
     );
-    std.debug.print("{s}\n", .{filename});
+    const filepath = try std.fs.path.joinZ(
+        allocator,
+        &.{ subpath, filename },
+    );
+    std.debug.print(">>> {s}\n", .{filename});
 
     switch (image_data.data_format) {
         .DATA_URL => {
-            const image_file = try fs.cwd().createFile(filename, .{});
+            const image_file = try fs.cwd().createFile(filepath, .{});
             defer image_file.close();
             const schema = "data:image/png;base64,";
             const data_str = image_data.data[schema.len..];
@@ -95,7 +72,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
             try image_file.writeAll(data_decoded);
         },
         .RAW => {
-            const img = zstbi.Image{
+            const image = zstbi.Image{
                 .width = @intCast(image_data.width),
                 .height = @intCast(image_data.height),
                 .num_components = 4,
@@ -104,7 +81,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
                 .bytes_per_component = 1,
                 .is_hdr = false,
             };
-            zstbi.Image.writeToFile(img, filename, .png) catch |err| {
+            zstbi.Image.writeToFile(image, filepath, .png) catch |err| {
                 std.log.err("{any}", .{err});
             };
         },
@@ -144,14 +121,22 @@ const routes: []const tk.Route = &.{
 };
 
 const api = struct {
-    pub fn @"PUT /ffmpeg"(req: *tk.Request, _: std.mem.Allocator, image_data: ImageData) !u32 {
+    pub fn @"PUT /ffmpeg"(
+        req: *tk.Request,
+        _: std.mem.Allocator,
+        image_data: img.ImageData,
+    ) !u32 {
         _ = req;
         _ = image_data;
         // @TODO
         return 501;
     }
 
-    pub fn @"POST /imageseq"(req: *tk.Request, allocator: std.mem.Allocator, payload: ImageData) !u32 {
+    pub fn @"POST /imageseq"(
+        req: *tk.Request,
+        allocator: std.mem.Allocator,
+        payload: img.ImageData,
+    ) !u32 {
         _ = req;
         std.debug.print(">>>{f}\n", .{payload});
         try storeImage(allocator, payload);
