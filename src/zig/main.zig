@@ -3,6 +3,7 @@ const tk = @import("tokamak");
 const zstbi = @import("zstbi");
 const ziggy = @import("ziggy");
 const config = @import("Config.zig");
+const img = @import("ImageData.zig");
 
 const Allocator = std.mem.Allocator;
 const fs = std.fs;
@@ -12,36 +13,8 @@ const b64_decoder = b64.standard.Decoder;
 const l = std.log.scoped(.framerecorder);
 
 const max_threads: u8 = 4;
-var image_data_buffers: [max_threads]std.array_list.Managed(ImageData) = undefined;
+var image_data_buffers: [max_threads]std.array_list.Managed(img.ImageData) = undefined;
 var storage_threads: std.array_list.Managed(std.Thread) = undefined;
-
-const ImageDataFormat = enum(u3) {
-    RAW,
-    DATA_URL,
-};
-
-pub const ImageData = struct {
-    frame: u32,
-    width: i32,
-    height: i32,
-    foldername: []const u8,
-    filename: []const u8,
-    ext: []const u8,
-    data_format: ImageDataFormat = .RAW,
-    data: []u8,
-
-    pub fn format(self: ImageData, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        try writer.print("\nformat: {t}\nframe: {d}\nsize: {d} × {d}\nlocation: {s}/{s} [.{s}]", .{
-            self.data_format,
-            self.frame,
-            self.width,
-            self.height,
-            self.foldername,
-            self.filename,
-            self.ext,
-        });
-    }
-};
 
 fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
     var child_process = std.process.Child.init(&[_][]const u8{
@@ -68,7 +41,7 @@ fn encodeVideo(allocator: Allocator, bytes: []const u8) !void {
     std.debug.print("{s}", .{stdout_buf.items});
 }
 
-fn storeImage(allocator: Allocator, image_data: ImageData) !void {
+fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
     const subpath = try std.fs.path.join(
         allocator,
         &.{
@@ -103,7 +76,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
             try image_file.writeAll(data_decoded);
         },
         .RAW => {
-            const img = zstbi.Image{
+            const image = zstbi.Image{
                 .width = @intCast(image_data.width),
                 .height = @intCast(image_data.height),
                 .num_components = 4,
@@ -112,7 +85,7 @@ fn storeImage(allocator: Allocator, image_data: ImageData) !void {
                 .bytes_per_component = 1,
                 .is_hdr = false,
             };
-            zstbi.Image.writeToFile(img, filepath[0.. :0], .png) catch |err| {
+            zstbi.Image.writeToFile(image, filepath[0.. :0], .png) catch |err| {
                 std.log.err("{any}", .{err});
             };
         },
@@ -139,7 +112,7 @@ pub fn main() !void {
 
     storage_threads = std.array_list.Managed(std.Thread).init(allocator);
     for (0..max_threads) |i| {
-        image_data_buffers[i] = std.array_list.Managed(ImageData).init(allocator);
+        image_data_buffers[i] = std.array_list.Managed(img.ImageData).init(allocator);
         const t = try std.Thread.spawn(.{}, storeBuffers, .{ allocator, i });
         try storage_threads.append(t);
     }
@@ -184,14 +157,14 @@ const routes: []const tk.Route = &.{
 };
 
 const api = struct {
-    pub fn @"PUT /ffmpeg"(req: *tk.Request, _: std.mem.Allocator, image_data: ImageData) !u32 {
+    pub fn @"PUT /ffmpeg"(req: *tk.Request, _: std.mem.Allocator, image_data: img.ImageData) !u32 {
         _ = req;
         _ = image_data;
         // @TODO
         return 501;
     }
 
-    pub fn @"POST /imageseq"(req: *tk.Request, _: std.mem.Allocator, payload: ImageData) !u32 {
+    pub fn @"POST /imageseq"(req: *tk.Request, _: std.mem.Allocator, payload: img.ImageData) !u32 {
         _ = req;
         std.debug.print(">>>{f}\n", .{payload});
         try image_data_buffers[@mod(payload.frame, max_threads)].append(payload);
