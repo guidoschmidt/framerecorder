@@ -72,7 +72,7 @@ fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
             try image_file.writeAll(data_decoded);
         },
         .RAW => {
-            const image = zstbi.Image{
+            var image = zstbi.Image{
                 .width = @intCast(image_data.width),
                 .height = @intCast(image_data.height),
                 .num_components = 4,
@@ -81,6 +81,7 @@ fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
                 .bytes_per_component = 1,
                 .is_hdr = false,
             };
+            defer image.deinit();
             zstbi.Image.writeToFile(image, filepath, .png) catch |err| {
                 std.log.err("{any}", .{err});
             };
