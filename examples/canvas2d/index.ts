@@ -1,5 +1,4 @@
 import { saveCanvasToBackendWithWorker } from "../../src/ts/framerecorder";
-
 const workerUrl = new URL("./worker", import.meta.url);
 
 declare global {
