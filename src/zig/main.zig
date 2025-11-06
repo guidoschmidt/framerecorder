@@ -45,6 +45,7 @@ fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
             image_data.foldername,
         },
     );
+    defer allocator.free(subpath);
     try fs.cwd().makePath(subpath);
 
     var temp_buffer: [1024]u8 = undefined;
@@ -53,10 +54,13 @@ fn storeImage(allocator: Allocator, image_data: img.ImageData) !void {
         "{s}_{d:0>4}.{s}",
         .{ image_data.filename, image_data.frame, image_data.ext },
     );
+    defer allocator.free(filename);
+
     const filepath = try std.fs.path.joinZ(
         allocator,
         &.{ subpath, filename },
     );
+    defer allocator.free(filepath);
     std.debug.print(">>> {s}\n", .{filename});
 
     switch (image_data.data_format) {
