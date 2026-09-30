@@ -1,15 +1,12 @@
 export enum ImageDataFormat {
-  RAW,
-  DATA_URL,
+  RAW = 0,
+  DATA_URL = 1,
 };
 
 export type ImageData = {
-    frame: number,
     width: number,
     height: number,
-    foldername: string,
-    filename: string,
-    ext: "png",
-    data_format: ImageDataFormat,
+    ext: string,
+    img_format: ImageDataFormat,
     data: string,
 }

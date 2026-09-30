@@ -4,71 +4,77 @@ const ImageData = @import("ImageData.zig").ImageData;
 var allocator: std.mem.Allocator = undefined;
 var file_prefix: []const u8 = undefined;
 var foldername: []const u8 = undefined;
-var thread_pool: std.Thread.Pool = undefined;
-var wait_group: std.Thread.WaitGroup = .{};
+// var thread_pool: std.Thread.Pool = undefined;
+// var wait_group: std.Thread.WaitGroup = .{};
 
 pub fn init(alloc: std.mem.Allocator, filename: []const u8, folder: []const u8) !void {
     allocator = alloc;
     file_prefix = filename;
     foldername = folder;
-    try thread_pool.init(.{
-        .allocator = allocator,
-    });
+    // try thread_pool.init(.{
+    //     .allocator = allocator,
+    // });
 }
 
 pub fn deinit() void {
-    thread_pool.deinit();
-    wait_group.wait();
+    // thread_pool.deinit();
+    // wait_group.wait();
 }
 
-pub fn storePixels(pixels: []u8, width: i32, height: i32, frame: u32) !void {
+pub fn storePixels(
+    io: std.Io,
+    pixels: []u8,
+    width: i32,
+    height: i32,
+    frame: u32,
+) !void {
+    _ = frame;
     const payload = ImageData{
-        .frame = frame,
-        .ext = "png",
-        .filename = file_prefix,
-        .foldername = foldername,
-        .data = pixels,
         .width = width,
         .height = height,
-    };
-    try sendPayload(payload);
-}
-
-pub fn storePixelsThreaded(pixels: []u8, width: i32, height: i32, frame: u32) !void {
-    const payload = ImageData{
-        .frame = frame,
         .ext = "png",
-        .filename = file_prefix,
-        .foldername = foldername,
+        .img_format = .RAW,
         .data = pixels,
-        .width = width,
-        .height = height,
     };
-    thread_pool.spawnWg(&wait_group, startThread, .{payload});
+    try sendPayload(io, payload);
 }
 
-pub fn startThread(payload: ImageData) void {
-    sendPayload(payload) catch @panic("Failed to send payload!");
-}
+// pub fn storePixelsThreaded(pixels: []u8, width: i32, height: i32, frame: u32) !void {
+//     const payload = ImageData{
+//         .frame = frame,
+//         .ext = "png",
+//         .filename = file_prefix,
+//         .foldername = foldername,
+//         .data = pixels,
+//         .width = width,
+//         .height = height,
+//     };
+//     thread_pool.spawnWg(&wait_group, startThread, .{payload});
+// }
 
-pub fn sendPayload(payload: ImageData) !void {
-    var json_writer: std.io.Writer.Allocating = .init(allocator);
+// pub fn startThread(payload: ImageData) void {
+//     sendPayload(payload) catch @panic("Failed to send payload!");
+// }
+
+pub fn sendPayload(io: std.Io, payload: ImageData) !void {
+    var json_writer: std.Io.Writer.Allocating = .init(allocator);
     defer json_writer.deinit();
     try std.json.Stringify.value(payload, .{
-        .whitespace = .indent_1,
+        .whitespace = .indent_2,
     }, &json_writer.writer);
 
     var response: std.Io.Writer.Allocating = .init(allocator);
     defer response.deinit();
 
     var http_client = std.http.Client{
+        .io = io,
         .allocator = std.heap.page_allocator,
     };
     defer http_client.deinit();
     const request = try http_client.fetch(.{
         .method = .POST,
         .location = .{
-            .url = "http://127.0.0.1:8000/api/imageseq",
+            .url = "http://127.0.0.1:1337/api/imageseq/test/1",
         },
         .payload = json_writer.written(),
         .response_writer = &response.writer,

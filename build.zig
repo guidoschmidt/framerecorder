@@ -35,22 +35,22 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("zstbi", zstbi.module("root"));
 
-    const ziggy_dep = b.dependency("ziggy", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("ziggy", ziggy_dep.module("ziggy"));
-
     // Installation
     b.installArtifact(exe);
 
     // Run
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    // Testing
+    const exe_tests = b.addTest(.{
+        .root_module = exe.root_module,
+    });
+
+    const run_exe_tests = b.addRunArtifact(exe_tests);
+    const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&run_exe_tests.step);
 }

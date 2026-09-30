@@ -1,64 +1,62 @@
 import type { ImageData } from "./ImageData";
 import { ImageDataFormat } from "./ImageData";
 
-export async function saveCanvasToBackend(
-  url: string,
-  selector: string,
+export async function saveCanvas(
+  host: string,
+  port: number,
   sequence: string,
   frame: number,
+  canvas: HTMLCanvasElement,
+  workerUrl?: URL) {
+  const url = `${host}:${port}/api/imageseq/${sequence}/${frame}`;
+  if (workerUrl) {
+    return saveCanvasToBackendWithWorker(url, canvas, workerUrl);
+  }
+  else return saveCanvasToBackend(url, canvas);
+}
+
+function saveCanvasToBackend(
+  url: string,
+  canvas: HTMLCanvasElement,
 ) {
-  const canvas: HTMLCanvasElement | null = document.querySelector(
-    selector || "canvas",
-  );
   if (canvas === null) {
-    throw new Error(`No canvas element with ${selector} found`);
+    throw new Error(`Canvas element is null`);
   }
   const dataUrl = canvas!.toDataURL("image/png");
+
+  // @TODO
+  // Use `getImageData` via context
+  // const ctx = canvas.getContext("2d");
+  // ctx.getImageData();
+
   const data: ImageData = {
-    frame,
     width: canvas.width,
     height: canvas.height,
-    data_format: ImageDataFormat.DATA_URL,
+    img_format: ImageDataFormat.DATA_URL,
     data: dataUrl,
-    foldername: `${sequence}`,
-    filename: "test",
     ext: "png",
   };
-  await fetch(url, {
-    method: "POST",
+  return fetch(url, {
+    method: "PUT",
     body: JSON.stringify(data),
   });
 }
 
-export function saveCanvasToBackendWithWorker(
+function saveCanvasToBackendWithWorker(
   url: string,
-  selector: string,
-  sequence: string,
-  frame: number,
+  canvas: HTMLCanvasElement,
   workerUrl: URL,
 ) {
-  const canvas: HTMLCanvasElement | null = document.querySelector(
-    selector || "canvas",
-  );
   if (canvas === null) {
-    throw new Error(`No canvas element with ${selector} found`);
+    throw new Error(`No canvas element is null`);
   }
   const dataUrl = canvas!.toDataURL("image/png");
-  const data = {
-    frame,
+  const data: ImageData = {
     width: canvas.width,
     height: canvas.height,
     data: dataUrl,
-    data_format: ImageDataFormat.DATA_URL,
-    foldername: `${sequence}`,
-    filename: "test",
-    ext: "png",
-    format: 1,
+    format: ImageDataFormat.DATA_URL,
   };
-  runInWebWorker(url, data, workerUrl);
-}
-
-function runInWebWorker(url: string, data: any, workerUrl: URL) {
   const worker = new Worker(workerUrl, {
     type: "module",
   });
@@ -68,4 +66,23 @@ function runInWebWorker(url: string, data: any, workerUrl: URL) {
     // Free up memory
     URL.revokeObjectURL(url);
   };
+}
+
+/**
+ * Helper function to import and use in a worker implementation, e.g.
+ * ```ts
+ * import { passToWorker } from "framerecorder"
+ * 
+ * ```
+ */
+export async function passToWorker(
+  e: { data: [URL, string] },
+  postMessage: Function,
+) {
+  const [url, data] = e.data;
+  await fetch(url, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  postMessage(true);
 }
