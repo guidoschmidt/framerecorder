@@ -1,0 +1,201 @@
+// This is NOT supposed to be yet another-cli-framework. It should stay simple
+// and easy to use, without any need for excessive configuration.
+//
+// If you are writing a CLI app, this might be a good start but it's unlikely
+// that it will suit your needs later in the project. You've been warned.
+//
+// The primary use-case for this is to make it easy to provide a companion CLI
+// binary to your EXISTING (likely server-side) application.
+//
+// THE IDEA is that you should be able to re-use your app DI module(s), with
+// all the services, configuration, db. connections, etc. so when you run the
+// CLI, you can easily invoke any `T.fun` you make available as command.
+//
+// You can use this for running db migrations, imports/exports, backups,
+// or whatever.
+
+const std = @import("std");
+const meta = @import("meta.zig");
+const Injector = @import("injector.zig").Injector;
+const parseValue = @import("parse.zig").parseValue;
+
+/// Runtime context for CLI commands. Most handlers won't need this directly
+/// since dependencies and arguments are injected into the handler function.
+pub const Context = struct {
+    arena: std.mem.Allocator,
+    bin: []const u8,
+    command: *const Command,
+    args: []const []const u8,
+    in: *std.Io.Reader,
+    out: *std.Io.Writer,
+    err: *std.Io.Writer,
+    injector: *Injector,
+
+    /// Parse a string value into the requested type.
+    pub fn parse(self: *Context, comptime T: type, s: []const u8) !T {
+        return parseValue(T, s, self.arena);
+    }
+
+    /// Write a result to the output stream.
+    pub fn output(self: *Context, res: anytype) !void {
+        const T = @TypeOf(res);
+
+        switch (@typeInfo(T)) {
+            // std.json can't stringify these
+            .void => return,
+            .error_set => return self.output(.{ .@"error" = res }),
+            .error_union => return if (res) |r| self.output(r) else |e| self.output(e),
+            else => {},
+        }
+
+        var jw: std.json.Stringify = .{ .writer = self.out, .options = .{ .whitespace = .indent_2 } };
+        try jw.write(res);
+    }
+};
+
+/// A CLI command definition with name, description, and handler.
+pub const Command = struct {
+    name: []const u8,
+    description: []const u8,
+    handler: *const fn (*Context) anyerror!void,
+    tids: []const meta.TypeId,
+
+    pub const usage: Command = cmd0("usage", "Show this help message", printUsage);
+
+    /// Create a command with explicit argument count. Dependencies are injected,
+    /// remaining parameters are parsed from command-line arguments.
+    pub fn cmd(comptime name: []const u8, comptime description: []const u8, comptime fun: anytype, comptime n_args: usize) Command {
+        const info = @typeInfo(@TypeOf(fun));
+        if (info != .@"fn") @compileError("Command handler must be a function");
+
+        const params = info.@"fn".param_types;
+        const n_deps = params.len - n_args;
+        const n_req = blk: {
+            var n: usize = n_args;
+            while (n > 0 and meta.isOptional(params[n_deps + n - 1].?)) n -= 1;
+            break :blk n;
+        };
+
+        const H = struct {
+            fn handler(ctx: *Context) anyerror!void {
+                var args: std.meta.ArgsTuple(@TypeOf(fun)) = undefined;
+
+                if (ctx.args.len < n_req) {
+                    return error.MissingArg;
+                }
+
+                inline for (0..n_deps) |i| {
+                    args[i] = try ctx.injector.get(@TypeOf(args[i]));
+                }
+
+                inline for (0..n_req, n_deps..) |j, i| {
+                    args[i] = try ctx.parse(@TypeOf(args[i]), ctx.args[j]);
+                }
+
+                inline for (n_req..n_args, n_deps + n_req..) |j, i| {
+                    args[i] = if (j < ctx.args.len) try ctx.parse(@TypeOf(args[i]), ctx.args[j]) else null;
+                }
+
+                ctx.output(@call(.auto, fun, args)) catch {};
+                return;
+            }
+        };
+
+        return .{
+            .name = name,
+            .description = description,
+            .handler = &H.handler,
+            .tids = meta.tids(meta.fnParams(fun)[n_deps..]),
+        };
+    }
+
+    /// Create a command with no arguments (dependencies only).
+    pub fn cmd0(comptime name: []const u8, comptime description: []const u8, comptime fun: anytype) Command {
+        return cmd(name, description, fun, 0);
+    }
+
+    /// Create a command with one argument.
+    pub fn cmd1(comptime name: []const u8, comptime description: []const u8, comptime fun: anytype) Command {
+        return cmd(name, description, fun, 1);
+    }
+
+    /// Create a command with two arguments.
+    pub fn cmd2(comptime name: []const u8, comptime description: []const u8, comptime fun: anytype) Command {
+        return cmd(name, description, fun, 2);
+    }
+
+    /// Create a command with three arguments.
+    pub fn cmd3(comptime name: []const u8, comptime description: []const u8, comptime fun: anytype) Command {
+        return cmd(name, description, fun, 3);
+    }
+};
+
+/// Print usage information and available commands.
+pub fn printUsage(ctx: *Context, cmds: []const Command) !void {
+    try ctx.out.print("Usage: {s} <command> [args...]\n\n", .{ctx.bin});
+
+    try ctx.out.writeAll("Commands:\n");
+    for (cmds) |cmd| {
+        try ctx.out.print("  {s:<20} {s}\n", .{ cmd.name, cmd.description });
+    }
+
+    try ctx.out.writeAll("\nSyntax:\n");
+    for (cmds) |cmd| {
+        try ctx.out.print("  {s} {s}", .{ ctx.bin, cmd.name });
+        for (cmd.tids) |tid| {
+            try ctx.out.print(" <{s}>", .{tid.sname()});
+        }
+        try ctx.out.writeAll("\n");
+    }
+}
+
+/// CLI entry point. Use with `tk.app.run(tk.cli.run, &.{YourModule})`.
+pub fn run(inj: *Injector, io: std.Io, gpa: std.mem.Allocator, argz: std.process.Args, cmds: []const Command) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var in = std.Io.File.stdin().reader(io, &.{});
+    var out = std.Io.File.stdout().writer(io, &.{});
+    var err = std.Io.File.stderr().writer(io, &.{});
+
+    // NOTE: We are using arena so we don't need to free
+    const args = try argz.toSlice(arena.allocator());
+    for (args) |arg| if (!std.unicode.utf8ValidateSlice(arg)) return error.InvalidArg;
+
+    var cmd_args = args[1..];
+
+    // TODO: --version
+    // TODO: --help
+    var cmd = Command.usage;
+    if (cmd_args.len > 0) cmd = findCmd(cmds, cmd_args[0]) orelse cmd;
+
+    var cx: Context = undefined;
+
+    var child_inj: Injector = .init(&.{
+        .ref(&cx),
+        .ref(&cx.arena),
+    }, inj);
+
+    cx = .{
+        .arena = arena.allocator(),
+        .bin = std.fs.path.basename(args[0]),
+        .command = &cmd,
+        .args = cmd_args[@min(cmd_args.len, 1)..],
+        .in = &in.interface,
+        .out = &out.interface,
+        .err = &err.interface,
+        .injector = &child_inj,
+    };
+
+    cmd.handler(&cx) catch |e| {
+        cx.output(e) catch {};
+        cx.out.writeAll("\n") catch {};
+        printUsage(&cx, cmds) catch {};
+    };
+}
+
+fn findCmd(cmds: []const Command, name: []const u8) ?Command {
+    for (cmds) |cmd| {
+        if (std.mem.eql(u8, cmd.name, name)) return cmd;
+    } else return null;
+}

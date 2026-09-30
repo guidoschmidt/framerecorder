@@ -1,0 +1,376 @@
+const std = @import("std");
+const dom = @import("dom.zig");
+
+pub const Options = struct {
+    em_delim: []const u8 = "*",
+    strong_delim: []const u8 = "**",
+    ignore: packed struct {
+        a: bool = false,
+        img: bool = false,
+    } = .{},
+};
+
+pub fn html2md(allocator: std.mem.Allocator, node: *dom.Node, options: Options) ![]const u8 {
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+
+    var md = try Html2Md.init(&aw.writer, options);
+    try md.renderNode(node);
+
+    return aw.toOwnedSlice();
+}
+
+/// Streaming HTML-to-Markdown formatter. Implements the DOM visitor and writes
+/// to the provided writer.
+pub const Html2Md = struct {
+    options: Options,
+    out: *std.Io.Writer,
+    in_line: u8 = 0, // Replace line breaks with spaces if we are in <h1>, <tr>, ...
+    indent: u8 = 0, // Nesting depth of <ul> and/or <ol>
+    empty: bool = true, // True until we've pushed any content (skip leading whitespace) OR when we've just started new <li>
+    pending: union(enum) { nop, sp, br: u2 } = .nop, // Whitespace to be written before next content
+
+    pub fn init(out: *std.Io.Writer, options: Options) !Html2Md {
+        return .{
+            .options = options,
+            .out = out,
+        };
+    }
+
+    pub fn renderNode(self: *Html2Md, node: *dom.Node) !void {
+        try node.visit(self);
+    }
+
+    /// Handle element open
+    pub fn open(self: *Html2Md, element: *dom.Element) !void {
+        const p = dom.LocalName.parse;
+
+        try switch (element.local_name) {
+            p("br") => self.br(if (self.pending == .br) 2 else 1),
+            p("hr") => {
+                self.br(2);
+                try self.push("---");
+                self.br(2);
+            },
+            p("em"), p("i") => self.push(self.options.em_delim),
+            p("strong"), p("b") => self.push(self.options.strong_delim),
+            p("a") => if (!self.options.ignore.a) self.push("["),
+            p("img") => if (!self.options.ignore.img) {
+                try self.push("![");
+                try self.push(element.getAttribute("alt") orelse "");
+                try self.push("](");
+                try self.push(element.getAttribute("src") orelse "");
+                try self.push(")");
+            },
+            p("div") => self.br(1),
+            p("ul"), p("ol") => {
+                self.br(if (self.indent > 0) 1 else 2);
+                self.indent +|= 1;
+            },
+            p("p"), p("table") => self.br(2),
+            p("h1"), p("h2"), p("h3"), p("h4"), p("h5"), p("h6") => {
+                self.br(2);
+                self.in_line +|= 1;
+                try self.push("###### "['6' - element.local_name.name()[1] ..]);
+            },
+            p("th"), p("td") => self.sp(),
+            p("tr") => {
+                self.br(1);
+                self.in_line +|= 1;
+                try self.push("|");
+            },
+            p("li") => {
+                self.br(1);
+
+                const is_ordered = if (element.parentElement()) |parent| parent.local_name == p("ol") else false;
+
+                if (is_ordered) {
+                    // TODO: Add el.index, it will be useful for nth-child, even/odd
+                    var n: usize = 1;
+                    var prev = element.previousElementSibling();
+                    while (prev) |prevEl| : (prev = prevEl.previousElementSibling()) n += 1;
+
+                    // TODO: self.print()?
+                    try self.flushPending();
+                    try self.out.print("{d}. ", .{n});
+                } else {
+                    try self.push("- ");
+                }
+
+                // Reset "emptiness" (skip any leading white-space)
+                self.empty = true;
+            },
+            else => {},
+        };
+    }
+
+    /// Handle element close
+    pub fn close(self: *Html2Md, element: *dom.Element) !void {
+        const p = dom.LocalName.parse;
+
+        try switch (element.local_name) {
+            p("em"), p("i") => self.push(self.options.em_delim),
+            p("strong"), p("b") => self.push(self.options.strong_delim),
+            p("a") => if (!self.options.ignore.a) {
+                try self.push("](");
+                try self.push(element.getAttribute("href") orelse "");
+                try self.push(")");
+            },
+            p("div") => self.br(1),
+            p("ul"), p("ol") => {
+                self.indent -|= 1;
+                self.br(if (self.indent > 0) 1 else 2);
+            },
+            p("p"), p("table") => self.br(2),
+            p("h1"), p("h2"), p("h3"), p("h4"), p("h5"), p("h6") => {
+                self.in_line -|= 1;
+                self.br(2);
+            },
+            p("li") => {
+                self.br(1);
+            },
+            p("tr") => {
+                self.in_line -|= 1;
+                self.br(1);
+            },
+            p("th"), p("td") => {
+                self.sp();
+                try self.push("|");
+            },
+            else => {},
+        };
+    }
+
+    /// Handle text node
+    pub fn text(self: *Html2Md, tn: *dom.Text) !void {
+        // Nothing to do
+        if (tn.data.len() == 0) return;
+
+        // Trim first
+        const orig = tn.data.str();
+        const chunk = std.mem.trim(u8, orig, " \t\r\n");
+
+        // Nothing to write but keep the space
+        if (chunk.len == 0) return self.sp();
+
+        // There was leading white-space, save it
+        if (chunk[0] != orig[0]) self.sp();
+
+        // Write (along with normalized spacing, if there was any)
+        try self.push(chunk);
+
+        // There was trailing white-space, save it for next time
+        if (chunk[chunk.len - 1] != orig[orig.len - 1]) self.sp();
+    }
+
+    /// Write content but flush any pending white-space first
+    pub fn push(self: *Html2Md, chunk: []const u8) !void {
+        try self.flushPending();
+        try self.out.writeAll(chunk);
+        if (chunk.len > 0) self.empty = false;
+    }
+
+    fn flushPending(self: *Html2Md) !void {
+        if (!self.empty and self.pending != .nop) {
+            switch (self.pending) {
+                .nop => unreachable,
+                .sp => try self.out.writeAll(" "),
+                .br => |n| {
+                    try self.out.writeAll(if (n == 1) "\n" else "\n\n");
+
+                    if (self.indent > 1) {
+                        for (0..(self.indent -| 1) * 2) |_| try self.out.writeByte(' ');
+                    }
+                },
+            }
+        }
+
+        self.pending = .nop;
+    }
+
+    /// Request a pending space (unless there is a line-break already)
+    fn sp(self: *Html2Md) void {
+        if (self.pending == .nop) {
+            self.pending = .sp;
+        }
+    }
+
+    /// Request a pending line break (unless there any line breaks already, or we are in <th>, etc.)
+    fn br(self: *Html2Md, n: u2) void {
+        if (self.in_line > 0) {
+            self.pending = .sp;
+        } else {
+            const n_max = @max(n, if (self.pending == .br) self.pending.br else 0);
+            self.pending = .{ .br = n_max };
+        }
+    }
+};
+
+fn expectMd(comptime input: []const u8, expected: []const u8) !void {
+    try expectMdOpts(input, expected, .{});
+}
+
+fn expectMdOpts(comptime input: []const u8, expected: []const u8, options: Options) !void {
+    var doc = try dom.Document.parseFromSlice(std.testing.allocator, "<test>" ++ input ++ "</test>");
+    defer doc.deinit();
+
+    const md = try html2md(std.testing.allocator, &doc.node, options);
+    defer std.testing.allocator.free(md);
+
+    try std.testing.expectEqualStrings(expected, md);
+}
+
+test "empty" {
+    try expectMd("", "");
+    try expectMd(" ", "");
+    try expectMd("   \n\t  ", "");
+    // TODO: &nbsp; etc. (SAX)
+}
+
+test "inline" {
+    try expectMd("hello world", "hello world");
+    // try expectMd("  hello   world  ", "hello world");
+    try expectMd("<em>italic</em>", "*italic*");
+    try expectMd("<i>italic</i>", "*italic*");
+    try expectMd("<strong>bold</strong>", "**bold**");
+    try expectMd("<b>bold</b>", "**bold**");
+    try expectMd("<em>italic <strong>bold</strong></em>", "*italic **bold***");
+}
+
+test "line breaks" {
+    try expectMd("line1<br>line2<br/>line3<br />", "line1\nline2\nline3");
+    try expectMd("line1 <br><br><br> line2", "line1\n\nline2");
+}
+
+test "headings" {
+    try expectMd("<h1>Heading 1</h1>", "# Heading 1");
+    try expectMd("<h2>Heading 2</h2>", "## Heading 2");
+    try expectMd("<h3>Heading 3</h3>", "### Heading 3");
+    try expectMd("<h4>Heading 4</h4>", "#### Heading 4");
+    try expectMd("<h5>Heading 5</h5>", "##### Heading 5");
+    try expectMd("<h6>Heading 6</h6>", "###### Heading 6");
+
+    try expectMd("<h1>First</h1><h2>Second</h2>", "# First\n\n## Second");
+    try expectMd("text<h1>Heading</h1>more text", "text\n\n# Heading\n\nmore text");
+}
+
+test "divs" {
+    try expectMd("<div>content</div>", "content");
+    try expectMd("<div>first</div><div>second</div>", "first\nsecond");
+}
+
+test "paragraphs" {
+    try expectMd("<p>para</p>", "para");
+    try expectMd("<p>para</p>text", "para\n\ntext");
+    try expectMd("<p>first</p><p>second</p>", "first\n\nsecond");
+    try expectMd("text<p>para</p>more", "text\n\npara\n\nmore");
+}
+
+test "lists" {
+    // Unordered
+    try expectMd("<ul><li>item</li></ul>", "- item");
+    try expectMd("<ul><li>first</li><li>second</li></ul>", "- first\n- second");
+    try expectMd("<ul><li>first</li><li>second</li><li>third</li></ul>", "- first\n- second\n- third");
+
+    // Ordered
+    try expectMd("<ol><li>item</li></ol>", "1. item");
+    try expectMd("<ol><li>first</li><li>second</li></ol>", "1. first\n2. second");
+    try expectMd("<ol><li>first</li><li>second</li><li>third</li></ol>", "1. first\n2. second\n3. third");
+
+    // heading inside list items
+    try expectMd("<ol><li><h3>first</h3></li><li><h3>second</h3></li></ol>", "1. ### first\n\n2. ### second");
+    try expectMd("<ul><li><h3>first</h3></li><li><h3>second</h3></li></ul>", "- ### first\n\n- ### second");
+
+    // <div> inside list items
+    try expectMd("<ol><li><div>first</div></li><li><div>second</div></li></ol>", "1. first\n2. second");
+    try expectMd("<ul><li><div>first</div></li><li><div>second</div></li></ul>", "- first\n- second");
+
+    // Nesting
+    try expectMd("<ul><li>parent<ul><li>child</li></ul></li></ul>", "- parent\n  - child");
+    try expectMd("<ol><li>parent<ol><li>child</li></ol></li></ol>", "1. parent\n  1. child");
+
+    // Siblings
+    // try expectMd("<ul><li>list1</li></ul><ul><li>list2</li></ul>", "- list1\n\n- list2");
+
+    // Missing ul/ol (invalid HTML but we should still keep each item on its own line)
+    try expectMd("TODO:<li>one</li><li>two</li>", "TODO:\n- one\n- two");
+}
+
+test "tables" {
+    // TODO: ---
+    try expectMd(
+        "<table><tr><th>key</th><th>value</th></tr><tr><td>foo</td><td>bar</td></tr><tr><td>baz</td><td>qux</td></tr></table>",
+        "| key | value |\n| foo | bar |\n| baz | qux |",
+    );
+
+    try expectMd(
+        \\<table>
+        \\<tr>
+        \\  <th>foo</th>
+        \\  <th>bar</th>
+        \\</tr>
+        \\<tr>
+        \\  <td>
+        \\    <div>baz</div>
+        \\  </td>
+        \\  <td>
+        \\    <div>qux</div>
+        \\  </td>
+        \\</tr>
+        \\</table>
+    ,
+        "| foo | bar |\n| baz | qux |",
+    );
+}
+
+test "strip <script>, <style>" {
+    try expectMd("<script>foo</script>", "");
+    try expectMd("<style>foo</style>", "");
+}
+
+// test "uppercase" {
+//     try expectMd("<EM>foo</EM>", "*foo*");
+//     try expectMd("<STRONG>foo</STRONG>", "**foo**");
+// }
+
+test "links and images" {
+    try expectMd("<a>foo</a>", "[foo]()");
+    try expectMd("<a href=\"/\">Home</a>", "[Home](/)");
+
+    try expectMd("<img>", "![]()");
+    try expectMd("<img src=\"photo.jpg\" alt=\"A sunset\">", "![A sunset](photo.jpg)");
+    try expectMd("<a href=\"/gallery\"><img src=\"thumb.jpg\" alt=\"Preview\"></a>", "[![Preview](thumb.jpg)](/gallery)");
+
+    // With ignore options
+    try expectMdOpts("<a href=\"/\">Home</a>", "Home", .{ .ignore = .{ .a = true } });
+    try expectMdOpts("<img src=\"photo.jpg\" alt=\"A sunset\">", "", .{ .ignore = .{ .img = true } });
+    try expectMdOpts("<a href=\"/gallery\"><img src=\"thumb.jpg\" alt=\"Preview\"></a>", "", .{ .ignore = .{ .a = true, .img = true } });
+}
+
+test "horizontal rule" {
+    try expectMd("<p>A</p><hr><p>B</p>", "A\n\n---\n\nB");
+    try expectMd("<hr>", "---");
+}
+
+test "ignore other" {
+    try expectMd("<body>foo</body>", "foo");
+    try expectMd("<unknown>foo</unknown>", "foo");
+}
+
+test "edge cases" {
+    try expectMd("<span>foo</span><span>bar</span>", "foobar");
+    try expectMd("<p>foo <span>bar</span></p>", "foo bar");
+    // try expectMd("  multiple   spaces  ", "multiple spaces");
+
+    try expectMd("<strong><em>bold italic</em></strong>", "***bold italic***");
+    try expectMd("<em><strong>italic bold</strong></em>", "***italic bold***");
+
+    try expectMd("<p></p>", "");
+    try expectMd("<strong></strong>", "****");
+
+    try expectMd("<p>foo <span>bar</span> <span>baz</span></p>", "foo bar baz");
+    try expectMd("foo <em>bar</em> baz", "foo *bar* baz");
+    try expectMd("<span>  foo</span><span>  bar</span>", "foo bar");
+
+    try expectMd("<ul><li>Gymnastick&eacute; &scaron;vihadlo</li></ul>", "- Gymnastické švihadlo");
+}

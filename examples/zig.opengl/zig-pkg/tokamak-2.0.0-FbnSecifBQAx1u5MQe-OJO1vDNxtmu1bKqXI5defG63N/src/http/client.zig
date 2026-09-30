@@ -1,0 +1,211 @@
+const std = @import("std");
+const meta = @import("../meta.zig");
+
+pub const RequestOptions = struct {
+    base_url: ?[]const u8 = null,
+    method: std.http.Method = .GET,
+    url: []const u8 = "",
+    headers: []const std.http.Header = &.{},
+    body: ?RequestBody = null,
+    max_len: usize = 1024 * 1024,
+    timeout: i64 = 60, // seconds
+};
+
+pub const RequestBody = struct {
+    ctx: *const anyopaque,
+    content_type: []const u8,
+    render: *const fn (ctx: *const anyopaque, writer: *std.Io.Writer) anyerror!void,
+
+    pub fn write(self: RequestBody, writer: *std.Io.Writer) !void {
+        try self.render(self.ctx, writer);
+    }
+
+    pub fn json(ptr: anytype) RequestBody {
+        const H = struct {
+            fn render(ctx: @TypeOf(ptr), writer: *std.Io.Writer) anyerror!void {
+                var jw: std.json.Stringify = .{ .writer = writer };
+                try jw.write(ctx);
+            }
+        };
+
+        return .{
+            .ctx = @ptrCast(ptr),
+            .content_type = "application/json",
+            .render = @ptrCast(&H.render),
+        };
+    }
+};
+
+pub const Response = struct {
+    arena: std.mem.Allocator,
+    status: std.http.Status,
+    headers: std.StringHashMapUnmanaged([]const u8),
+    body: []const u8,
+
+    pub fn json(self: Response, comptime T: type) !T {
+        errdefer std.log.err("Failed to parse {s}: {s}", .{ @typeName(T), self.body[0..@min(self.body.len, 512)] });
+
+        return std.json.parseFromSliceLeaky(T, self.arena, self.body, .{
+            .ignore_unknown_fields = true,
+        });
+    }
+};
+
+pub const Client = struct {
+    make_request: *const fn (*Client, std.mem.Allocator, RequestOptions) Error!Response,
+
+    // TODO
+    const Error = anyerror;
+
+    pub fn request(self: *Client, arena: std.mem.Allocator, options: RequestOptions) !Response {
+        return self.make_request(self, arena, options);
+    }
+
+    pub fn get(self: *Client, arena: std.mem.Allocator, url: []const u8) !Response {
+        return self.request(arena, .{ .method = .GET, .url = url });
+    }
+
+    pub fn post(self: *Client, arena: std.mem.Allocator, url: []const u8, body: ?RequestBody) !Response {
+        return self.request(arena, .{ .method = .POST, .url = url, .body = body });
+    }
+
+    pub fn resolveUrl(buf: *[]u8, url: []const u8, base: ?[]const u8) !std.Uri {
+        @memcpy(buf.*[0..url.len], url);
+
+        return std.Uri.resolveInPlace(
+            if (base) |b| try std.Uri.parse(b) else .{ .scheme = "http" },
+            url.len,
+            buf,
+        );
+    }
+};
+
+pub const StdClient = struct {
+    std_client: std.http.Client,
+    interface: Client = .{
+        .make_request = &make_request,
+    },
+
+    pub fn init(io: std.Io, allocator: std.mem.Allocator) !@This() {
+        return .{
+            .std_client = .{ .allocator = allocator, .io = io },
+        };
+    }
+
+    pub fn deinit(self: *StdClient) void {
+        self.std_client.deinit();
+    }
+
+    // TODO: This is a minimal PoC for Zig 0.17.0 - now with proper timeout
+    fn make_request(client: *Client, arena: std.mem.Allocator, options: RequestOptions) !Response {
+        const self: *@This() = @alignCast(@fieldParentPtr("interface", client));
+        const io = self.std_client.io;
+
+        const SelectResult = union(enum) { timeout: anyerror!void, response: anyerror!Response };
+        var buf: [1]SelectResult = undefined;
+
+        var select: std.Io.Select(SelectResult) = .init(io, &buf);
+        defer select.cancelDiscard();
+
+        try select.concurrent(.timeout, std.Io.sleep, .{ io, .fromSeconds(options.timeout), .awake });
+        try select.concurrent(.response, make_request2, .{ self, arena, options });
+
+        return switch (try select.await()) {
+            .timeout => error.RequestTimeout,
+            .response => |res| res,
+        };
+    }
+
+    fn make_request2(self: *StdClient, arena: std.mem.Allocator, options: RequestOptions) !Response {
+        // NOTE: This is shared for both sending & receiving
+        var buf: []u8 = try arena.alloc(u8, 8 * 1024);
+
+        const url = try Client.resolveUrl(
+            &buf,
+            options.url,
+            options.base_url,
+        );
+
+        var req = try self.std_client.request(options.method, url, .{
+            .headers = .{
+                .content_type = if (options.body) |b| .{ .override = b.content_type } else .default,
+            },
+            .extra_headers = options.headers,
+            // TODO: fix this later, it looks like there's some std.http.Client pooling but we don't handle it properly
+            .keep_alive = false,
+        });
+        defer req.deinit();
+
+        if (options.body) |body| {
+            req.transfer_encoding = .chunked;
+            var bw = try req.sendBody(buf);
+            try body.write(&bw.writer);
+            try bw.end();
+        } else {
+            try req.sendBodiless();
+        }
+
+        var res = try req.receiveHead(buf);
+
+        var headers: std.StringHashMapUnmanaged([]const u8) = .{};
+        var it = res.head.iterateHeaders();
+        while (it.next()) |h| {
+            try headers.put(arena, h.name, h.value);
+        }
+
+        var decompress: std.http.Decompress = undefined;
+        const buf2 = try arena.alloc(u8, res.head.content_encoding.minBufferCapacity());
+        var reader = res.readerDecompressing(buf, &decompress, buf2);
+        const body = try reader.allocRemaining(arena, .limited(options.max_len));
+
+        return .{
+            .arena = arena,
+            .status = res.head.status,
+            .headers = headers,
+            .body = body,
+        };
+    }
+};
+
+// TODO: beforeAll/afterAll?
+test {
+    const tk = @import("../main.zig");
+
+    const H = struct {
+        fn slow(io: std.Io) !void {
+            return io.sleep(.fromSeconds(2), .awake);
+        }
+    };
+
+    const routes: []const tk.Route = &.{
+        .get("/ping", tk.send("pong")),
+        .get("/slow", H.slow),
+        // .post("/echo", tk.meta.dupe),
+    };
+
+    var server = try tk.Server.init(std.testing.io, std.testing.allocator, routes, .{ .listen = .{ .port = 8081 } });
+    defer server.deinit();
+
+    var thread = try std.Thread.spawn(.{}, tk.Server.start, .{&server});
+    defer thread.join();
+    defer server.stop();
+
+    var std_client = try StdClient.init(std.testing.io, std.testing.allocator);
+    defer std_client.deinit();
+
+    const client = &std_client.interface;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const res1 = try client.request(arena.allocator(), .{ .url = "http://localhost:8081/ping" });
+    try std.testing.expectEqual(.ok, res1.status);
+    try std.testing.expectEqualStrings("pong", res1.body);
+
+    // 1-second timeout against a 10-second handler -> should timeout.
+    const err = client.request(arena.allocator(), .{
+        .url = "http://localhost:8081/slow",
+        .timeout = 1,
+    });
+    try std.testing.expectError(error.RequestTimeout, err);
+}

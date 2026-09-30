@@ -1,0 +1,21 @@
+// © 2024 Carl Åstholm
+// SPDX-License-Identifier: MIT
+
+.{
+    .name = .zigglgen,
+    .version = "0.5.1",
+    .fingerprint = 0xf697891b962028ce,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "GeneratorOptions.zig",
+        "api_registry.zig",
+        "build.zig",
+        "build.zig.zon",
+        "shims.zig",
+        "zigglgen.zig",
+
+        "LICENSES/",
+        "LICENSE.txt",
+    },
+}

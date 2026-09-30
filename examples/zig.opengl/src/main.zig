@@ -1,25 +1,57 @@
 const std = @import("std");
-const zglfw = @import("zglfw");
+const glfw = @import("glfw");
 const gl = @import("gl");
-const framerecorder = @import("framerecorder");
+const fr = @import("framerecorder");
+
+const l = std.log.scoped(.@"opengl-example");
+
+var is_recording = false;
 
 fn getProcAddress(prefixed_name: [*:0]const u8) ?gl.PROC {
-    return @alignCast(zglfw.getProcAddress(std.mem.span(prefixed_name)));
+    return @ptrCast(@alignCast(glfw.getProcAddress(std.mem.span(
+        prefixed_name,
+    ))));
 }
 
-pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+fn keyCallback(
+    window: *glfw.Window,
+    key: c_int,
+    scancode: c_int,
+    action: c_int,
+    mods: c_int,
+) callconv(.c) void {
+    _ = window;
+    _ = scancode;
+    _ = mods;
+    switch (key) {
+        glfw.KeyR => {
+            if (action != glfw.Release) return;
+            l.info("{s} recording\n", .{
+                if (is_recording) "Stopped" else "Started",
+            });
+            is_recording = !is_recording;
+        },
+        else => {},
+    }
+}
 
-    var procs: gl.ProcTable = undefined;
+pub fn main(init: std.process.Init) !void {
+    var arena = init.arena.allocator();
 
     const width = 720;
     const height = 720;
-    try zglfw.init();
-    const window = try zglfw.Window.create(width, height, "framerecorder-zig.opengl", null);
-    defer window.destroy();
-    zglfw.makeContextCurrent(window);
+    try glfw.init();
+    const window = try glfw.createWindow(
+        width,
+        height,
+        "framerecorder-zig.opengl",
+        null,
+        null,
+    );
+    defer glfw.destroyWindow(window);
+    glfw.makeContextCurrent(window);
+
+    var procs: gl.ProcTable = undefined;
 
     if (!procs.init(getProcAddress)) return error.InitFailed;
     gl.makeProcTableCurrent(&procs);
@@ -31,30 +63,40 @@ pub fn main() !void {
     var g: f32 = 0.0;
     var b: f32 = 0.0;
 
-    var is_recording = false;
-    var pixels: []u8 = try allocator.alloc(u8, @as(usize, @intCast(width)) * @as(usize, @intCast(height)) * 4);
-    try framerecorder.init(allocator, "zig.opengl", "examples");
-    defer framerecorder.deinit();
+    const size = @as(usize, @intCast(width)) *
+        @as(usize, @intCast(height)) *
+        4;
+    var pixels: []u8 = try arena.alloc(
+        u8,
+        size,
+    );
+    try fr.init(arena, "zig.opengl", "examples");
+    defer fr.deinit();
 
-    while (!window.shouldClose() and window.getKey(.escape) != .press) {
+    _ = glfw.setKeyCallback(window, keyCallback);
+
+    while (!glfw.windowShouldClose(window)) {
+        glfw.pollEvents();
+
         gl.ClearColor(r, g, b, 1.0);
         gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-        if (window.getKey(.r) == .press) {
-            is_recording = true;
-        }
-        if (window.getKey(.s) == .press) {
-            is_recording = false;
-        }
-
-        zglfw.pollEvents();
-        window.swapBuffers();
+        glfw.swapBuffers(window);
 
         if (is_recording) {
-            std.debug.print("\nSaving frame {d}...", .{frame});
-            gl.ReadPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, @ptrCast(pixels[0..]));
-            try framerecorder.storePixelsThreaded(
-                try allocator.dupe(u8, pixels),
+            l.info("Saving frame {d:05}...\n", .{frame});
+            gl.ReadPixels(
+                0,
+                0,
+                width,
+                height,
+                gl.RGBA,
+                gl.UNSIGNED_BYTE,
+                @ptrCast(pixels[0..]),
+            );
+            try fr.storePixels(
+                init.io,
+                pixels,
                 width,
                 height,
                 frame,
